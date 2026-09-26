@@ -2098,6 +2098,83 @@ local function fzf_files_by_name(name)
   })
 end
 
+-- sm: ブックマーク(vim-bookmarks)の一覧。BookmarkShowAllでquickfixに書き出し、fzf-luaのquickfixで開く。
+--   fzf-luaのquickfixの既定のctrl-x(list_del)は一覧から外すだけでブックマーク自体は消えないので、
+--   ctrl-x/v/sはほかの一覧と同じ分割/タブに戻し、ブックマークの削除はctrl-d(選んだもの。tabで複数、ctrl-aで全部)で行う
+local function bookmark_echo(msg, hl)
+  vim.api.nvim_echo({ { msg, hl } }, false, {})
+end
+
+-- vim-bookmarksの自動保存は、バッファを離れるとき(BufLeave)に保存し、入るとき(BufEnter)に保存ファイルから読み直す。
+-- fzfの窓を開いた時点で削除前の状態が保存され、閉じて戻ると読み直されて消したものが戻るため、消したらすぐ保存する
+-- (保存先はBookmarkShowAll等と同じ。作業ディレクトリ/バッファごとに保存する設定は使っていない)
+local function bookmark_save()
+  if vim.g.bookmark_auto_save == 1 then
+    vim.fn.BookmarkSave(vim.g.bookmark_auto_save_file, 1) -- 1: メッセージを出さない
+  end
+end
+
+-- vim-bookmarksのs:bookmark_remove(スクリプトローカルで呼べない)と同じ手順で、1件消す
+-- vim-bookmarksはブックマークを付けたときのパスで覚えている。~/gitは~/Documents/gitへのリンクで、同じファイルでも
+-- 別のパスのバッファ(一覧の項目が指すバッファ)になることがあるため、実体のパスで比べて覚えているパスを探す
+-- ファイルが無くなっている(名前の変更・削除)と実体のパスが求められないので、そのときは親のフォルダで求める
+local function bookmark_realpath(file)
+  local real = vim.uv.fs_realpath(file)
+  if real then return real end
+  local dir = vim.uv.fs_realpath(vim.fs.dirname(file))
+  return dir and (dir .. "/" .. vim.fs.basename(file)) or file
+end
+
+local function bookmark_key(file)
+  local real = bookmark_realpath(file)
+  for _, key in ipairs(vim.fn["bm#all_files"]()) do
+    if key == file or bookmark_realpath(key) == real then return key end
+  end
+end
+
+local function bookmark_remove(file, lnum, bufnr)
+  local key = bookmark_key(file)
+  if key and vim.fn["bm#has_bookmark_at_line"](key, lnum) == 1 then
+    local bm = vim.fn["bm#get_bookmark_by_line"](key, lnum)
+    vim.fn["bm_sign#del"](key, bm.sign_idx)
+    -- bm_sign#delはパスでサインを外すので、パスが違うバッファでは外れない。バッファ番号でも外す
+    if bufnr then pcall(vim.fn.sign_unplace, "", { buffer = bufnr, id = bm.sign_idx }) end
+    vim.fn["bm#del_bookmark_at_line"](key, lnum)
+  end
+end
+
+local function bookmark_list()
+  local fzf_lua = require("fzf-lua")
+  vim.cmd("exec 'BookmarkShowAll' | cclose") -- 行番号をサインの位置に合わせ直してからquickfixに書き出す
+  if #vim.fn.getqflist() == 0 then
+    bookmark_echo("ブックマークはありません", "Normal")
+    return
+  end
+  fzf_lua.quickfix({
+    prompt = "BOOKMARKS> ",
+    header = ":: " .. table.concat({
+      fzf_hdr.bind("ctrl-d", "Delete"),
+      fzf_hdr.hint("ctrl-a", "select all"),
+      fzf_hdr.split_hint(),
+    }, "|"),
+    actions = {
+      ["ctrl-x"] = fzf_lua.actions.file_split,
+      ["ctrl-v"] = fzf_lua.actions.file_vsplit,
+      ["ctrl-s"] = fzf_lua.actions.file_tabedit,
+      -- 選んだブックマークを消して保存し、一覧を開き直す(全部消えたら閉じたまま)
+      ["ctrl-d"] = function(selected, opts)
+        for _, sel in ipairs(selected or {}) do
+          local e = require("fzf-lua.path").entry_to_file(sel, opts)
+          local file = e.bufnr and vim.api.nvim_buf_get_name(e.bufnr) or vim.fn.fnamemodify(e.path, ":p")
+          if file ~= "" and e.line then bookmark_remove(file, e.line, e.bufnr) end
+        end
+        bookmark_save()
+        vim.schedule(bookmark_list)
+      end,
+    },
+  })
+end
+
 require('fzf-lua').setup{
 
     -- vim.ui.selectをfzfで表示する。LSPのcode_action(sda/ga)は変更内容の差分プレビュー付きになる。
@@ -2234,7 +2311,6 @@ require('fzf-lua').setup{
     vim.keymap.set({ "n" }, "sC", function() require("fzf-lua").command_history({}) end, { noremap = true, silent = true, desc = "Fzf command history" }),
     vim.keymap.set({ "n" }, "sz", function() require("fzf-lua").resume({}) end, { noremap = true, silent = true, desc = "Fzf resume" }),
     vim.keymap.set({ "n" }, "sj", function() require("fzf-lua").jumps({}) end, { noremap = true, silent = true, desc = "Fzf jumps" }),
-    vim.keymap.set({ "n" }, "sM", function() require("fzf-lua").marks({}) end, { noremap = true, silent = true, desc = "Fzf marks" }),
     vim.keymap.set({ "n" }, "sk", function() require("fzf-lua").keymaps({}) end, { noremap = true, silent = true, desc = "Fzf keymaps" }),
     -- lsp
     -- conform.nvimでフォーマット(フォーマッタ未定義のファイルタイプはLSPのフォーマット)。visualなら選択範囲だけ
@@ -2281,7 +2357,7 @@ require('fzf-lua').setup{
     vim.keymap.set('n', 'sw', function() _G.fzf_fav_file_list(false) end, { noremap = true, silent = true, desc = "Fzf fav file list" }),
     vim.keymap.set('n', 'sW', function() _G.fzf_fav_file_list(true) end, { noremap = true, silent = true, desc = "Fzf fav dir list" }),
     -- bookmark
-    vim.keymap.set("n", "sm", ":exec 'BookmarkShowAll' | cclose | exec 'FzfLua quickfix'<CR>", { noremap = true, silent = true, desc = "memo open" }),
+    vim.keymap.set("n", "sm", bookmark_list, { noremap = true, silent = true, desc = "Fzf bookmarks" }),
     -- undo履歴(枝分かれも罫線のツリーで表示)。今の状態との差分をプレビューで見ながら選び、
     -- Enterでその状態に戻る(<F8>でプレビュー切替)
     vim.keymap.set("n", "su", function() require("fzf-lua").undotree() end, { noremap = true, silent = true, desc = "Fzf undotree" }),
@@ -2358,26 +2434,39 @@ vim.api.nvim_create_autocmd('LspAttach', {
 -- LSPは応答が届くまで折りたたみが無く(lua_lsで5〜10秒)、foldcolumn=auto:6の列が一度消えて文字がずれるため。
 -- 切り替えはこの関数の中で行い、'foldexpr'の値は変えない
 -- (LSP側は'foldexpr'が変わるとLSPの折りたたみを止めて作り直し、また応答待ちになる)。
--- LSPの結果に折りたたみが1つでも出たら準備完了とし、折りたたみを計算し直して、importの塊を閉じる(バッファごとに1回)
-function _G.lsp_or_ts_foldexpr()
-  local bufnr = vim.api.nvim_get_current_buf()
-  local lsp_level = vim.lsp.foldexpr(vim.v.lnum) -- 準備前も毎回呼ぶ(初回の呼び出しでLSPの折りたたみが有効になる)
-  if vim.b[bufnr].lsp_fold_ready then
-    return lsp_level
-  end
-  if lsp_level ~= "0" then
-    vim.b[bufnr].lsp_fold_ready = true
-    -- foldexprの中ではfoldmethodの変更等ができないので後に回す
-    vim.schedule(function()
-      for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
-        if vim.wo[win].foldexpr == "v:lua.lsp_or_ts_foldexpr()" then
-          vim.wo[win][0].foldmethod = "expr" -- 設定し直すと折りたたみが計算し直される
-          vim.lsp.foldclose("imports", win)
+-- LSPの結果に折りたたみが1つでも出たら準備完了とし、折りたたみを計算し直して、importの塊を閉じる(バッファごとに1回)。
+-- vim.lsp.foldexpr()は、LSPの折りたたみが有効になる前は呼ぶたびに「有効にする処理」を予約する。
+-- 1行ごとに呼ぶと4000行のファイルで8000回を超えて積まれ、起動直後の色付きの描画が遅れるので、
+-- バッファごとに最初の1回だけ呼んで予約させ、有効になるまでは呼ばない
+do
+  local lsp_fold = {} -- bufnr -> "kicked"(有効にする処理を予約した) / "on"(有効になった) / "ready"(LSPの結果が届いた)
+  function _G.lsp_or_ts_foldexpr()
+    local bufnr = vim.api.nvim_get_current_buf()
+    local st = lsp_fold[bufnr]
+    if st == "ready" then
+      return vim.lsp.foldexpr(vim.v.lnum)
+    end
+    if st == nil then
+      lsp_fold[bufnr] = "kicked"
+      vim.lsp.foldexpr(vim.v.lnum)
+      -- 予約された「有効にする処理」の後に走る(vim.scheduleは順番どおり)
+      vim.schedule(function()
+        if lsp_fold[bufnr] == "kicked" then lsp_fold[bufnr] = "on" end
+      end)
+    elseif st == "on" and vim.lsp.foldexpr(vim.v.lnum) ~= "0" then
+      lsp_fold[bufnr] = "ready"
+      -- foldexprの中ではfoldmethodの変更等ができないので後に回す
+      vim.schedule(function()
+        for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+          if vim.wo[win].foldexpr == "v:lua.lsp_or_ts_foldexpr()" then
+            vim.wo[win][0].foldmethod = "expr" -- 設定し直すと折りたたみが計算し直される
+            vim.lsp.foldclose("imports", win)
+          end
         end
-      end
-    end)
+      end)
+    end
+    return vim.treesitter.foldexpr()
   end
-  return vim.treesitter.foldexpr()
 end
 
 -- 次/前のメソッド名の先頭へ移動する(<M-j>/<M-k>)。countも使える(3<M-j>で3つ先)。
@@ -2891,13 +2980,17 @@ require("nvim-treesitter").install(langs)
 
 -- ハイライトの有効化。Neovimが標準でtreesitterを使うのはLua/Markdown/Vim script等の一部だけで、
 -- それ以外(Java/Python/TS/HTML等)はパーサーを入れても古い構文ハイライト(syntax)のままになるため、
--- パーサーがあるFileTypeでは明示的に開始する
+-- パーサーがあるFileTypeでは明示的に開始する。
+-- treesitterのハイライトは解析を描画と並行して(非同期で)行うため、開いた直後の数コマは色が付かないまま描かれる
+-- (init.luaで約0.1秒)。最初の解析だけ同期で済ませて、最初の画面から色を付ける。巨大なファイルは固まるので非同期のまま
 vim.api.nvim_create_autocmd("FileType", {
   group = vim.api.nvim_create_augroup("treesitter_highlight", { clear = true }),
   callback = function(args)
     local lang = vim.treesitter.language.get_lang(args.match)
-    if lang and vim.treesitter.language.add(lang) then
-      pcall(vim.treesitter.start, args.buf, lang)
+    if lang and vim.treesitter.language.add(lang) and pcall(vim.treesitter.start, args.buf, lang)
+      and vim.api.nvim_buf_line_count(args.buf) <= 20000 then
+      local parser = vim.treesitter.get_parser(args.buf, lang, { error = false })
+      if parser then parser:parse() end
     end
   end,
 })
