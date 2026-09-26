@@ -894,6 +894,31 @@ require('which-key').setup{
    { "m", mode = { "n", "v" } },
  },
 }
+-- mのヒントは、vim-bookmarksのキーのうちmm/miだけにする(ほかは隠すだけで、キーはそのまま使える)
+require('which-key').add({
+  { "mm", desc = "bookmark toggle" },
+  { "mi", desc = "bookmark annotate" },
+  { "mn", hidden = true }, { "mp", hidden = true }, { "ma", hidden = true },
+  { "mc", hidden = true }, { "mx", hidden = true }, { "mg", hidden = true },
+  { "mj", hidden = true }, { "mk", hidden = true }, -- mjj/mkkの途中
+})
+-- グループ名(「+10 keymaps」の代わりに出す)。キーの系統はCLAUDE.mdを参照
+require('which-key').add({
+  { "<Leader>g", group = "git" },
+  { "<Leader>q", group = "quickfix" },
+  { "<Leader>l", group = "loclist" },
+  { "<Leader>p", group = "overlook (peek)" },
+  { "<Leader>m", group = "markdown" },
+  { "sd", group = "lsp", mode = { "n", "x" } },
+  { "sg", group = "grep", mode = { "n", "x" } },
+  { ",,f", group = "copy / open", mode = { "n", "x" } },
+})
+-- 今のバッファだけに割り当てられているキー(LSPのK、diffview・oil・neogit・quickfixの窓のキー等)の一覧
+vim.keymap.set("n", "<Leader>k", function() require("which-key").show({ global = false }) end,
+  { noremap = true, silent = true, desc = "keys (buffer)" })
+-- <C-w>の一覧を出したままにして、<C-w>を押し直さずに窓の操作(>で幅、+/-で高さ、hjklで移動等)を続ける。escで抜ける
+vim.keymap.set("n", "<C-w><Space>", function() require("which-key").show({ keys = "<C-w>", loop = true }) end,
+  { noremap = true, silent = true, desc = "window hydra mode" })
 
 -- --------------------------------------------------
 -- Plugin:floatsheet
@@ -3081,10 +3106,10 @@ vim.keymap.set("i", "<C-\\>", "<Esc><Cmd>exe v:count1 . 'ToggleTerm name=default
 vim.keymap.set("n", "<C-¥>", "<Cmd>exe v:count1 . 'ToggleTerm name=default'<CR>", { noremap = true, silent = true })
 vim.keymap.set("i", "<C-¥>", "<Esc><Cmd>exe v:count1 . 'ToggleTerm name=default'<CR>", { noremap = true, silent = true })
 
-vim.keymap.set("n", "<Leader>t", ":<C-u>TermNew<CR>", { noremap = true, silent = true })
-vim.keymap.set("n", "<Leader>T", ":<C-u>TermNew direction=tab<CR>", { noremap = true, silent = true })
-vim.keymap.set("v", "<Leader>c", ":<C-u>ToggleTermSendVisualSelection<CR>", { noremap = true, silent = true })
-vim.keymap.set("n", "<Leader>c", ":<C-u>ToggleTermSendCurrentLine<CR>", { noremap = true, silent = true })
+vim.keymap.set("n", "<Leader>t", ":<C-u>TermNew<CR>", { noremap = true, silent = true, desc = "terminal new" })
+vim.keymap.set("n", "<Leader>T", ":<C-u>TermNew direction=tab<CR>", { noremap = true, silent = true, desc = "terminal new (tab)" })
+vim.keymap.set("v", "<Leader>c", ":<C-u>ToggleTermSendVisualSelection<CR>", { noremap = true, silent = true, desc = "terminal send (sel)" })
+vim.keymap.set("n", "<Leader>c", ":<C-u>ToggleTermSendCurrentLine<CR>", { noremap = true, silent = true, desc = "terminal send line" })
 
 vim.keymap.set("t", "<ESC>", "<C-\\><C-n>", { noremap = true, silent = true })
 
