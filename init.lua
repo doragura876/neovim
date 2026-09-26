@@ -101,6 +101,8 @@ vim.opt.updatetime=500                -- CursorHold等の発火間隔（既定40
 vim.opt.foldcolumn="auto:6"           -- 折りたたみの最深ネスト(上限6)に合わせて幅を自動調整。折りたたみが無ければ0列。元は"2"
 vim.opt.fillchars:append("fold:─")    -- 折りたたみ行の埋め文字
 vim.opt.foldlevel=15                  -- ネスト16段以上の折りたたみだけ最初から閉じる(実質全展開)。元は10
+vim.opt.foldopen:append("jump")       -- G・gg・<C-o>等で閉じた折りたたみの中へ移ったときも開く
+vim.opt.foldminlines=3                -- 3行以下の折りたたみは閉じない(細かすぎる折りたたみを減らす)
 vim.opt.foldtext=""                   -- 閉じた折りたたみ行を先頭行そのまま(構文色付き)で表示。行数は出ない。元は既定のfoldtext()
 
 -- treesitterによる折りたたみ(FileTypeごと・窓ローカル) ここから
@@ -4369,6 +4371,8 @@ vim.keymap.set('n', '<Leader>gc', function() require("fzf-lua").git_bcommits({})
 
 -- 折りたたみ
 vim.keymap.set("n", "<Leader>a", "za", { noremap = true, silent = true, desc = "fold toggle" })
+-- カーソルのある所以外の折りたたみを全部閉じて、画面の中央に置く(今いる所だけを見る)
+vim.keymap.set("n", "zV", "zMzvzz", { noremap = true, silent = true, desc = "fold focus (close others)" })
 
 -- --------------------------------------------------
 -- autocmd
